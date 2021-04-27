@@ -1,0 +1,5 @@
+This directory contain the workflow used in the WCM COVID sequencing project.
+
+Files not included: 
+- WuhanHu1.fasta: Wuhan Sars-Cov-2 genome sequence obtained from the NCBI repository.
+- cov19wuhan.mmi: minimap2 index file for the above

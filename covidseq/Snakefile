@@ -1,0 +1,174 @@
+import pandas as pd
+configfile: "config.yaml"
+
+df = pd.read_table(config["samplesFile"])
+
+basedir=df["basedir"]
+projects=df["project"]
+samples=df["sample"]
+
+scattergather:
+	split=4
+
+rule all:
+	input:
+		expand("consensus/{project}/{sample}.fa", zip, project=projects, sample=samples)
+
+checkpoint minimap2:
+	input:
+		index="/home/eli4001/databases/indexes/minimap/cov19wuhan.mmi"
+	params:
+		fq="/home/eli4001/covidseq/{project}/{sample}/fastq"
+	output:
+		dir=directory("alignments/{project}/{sample}")
+	threads: 4
+	resources:
+		mem_mb=2000,
+		runtime_min=30
+	benchmark:
+		"benchmark/minimap2/{project}/{sample}.tsv"
+	log:
+		"logs/{project}/{sample}/minimap2.log"
+	shell:
+		"""
+		mkdir -p {output.dir}
+		for f in {params.fq}/*R1.fastq.gz
+		do
+			SP=${{f%.R1.fastq.gz}}
+			BN=$(basename $SP)
+			minimap2 -t 3 -x sr -a {input.index} "$SP".R1.fastq.gz "$SP".R2.fastq.gz 2>> {log} | samtools view -ubS - > {output.dir}/"$BN".bam 2>> {log}
+		done
+		"""
+
+
+def aggregate_input(wildcards):
+    checkpoint_output = checkpoints.minimap2.get(**wildcards).output[0]
+    return expand("alignments/{project}/{sample}/{i}.bam",
+           project=wildcards.project, sample=wildcards.sample,
+           i=glob_wildcards(os.path.join(checkpoint_output, "{i}.bam")).i)
+
+rule merge:
+	input:
+               files=aggregate_input,
+               regionCov="data/targetCov.txt"
+	output:
+               bam="merged/{project}/{sample}.bam",
+               index="merged/{project}/{sample}.bam.bai",
+               stats="stats/{project}/{sample}.tsv"
+	resources:
+		mem_mb=2000,
+		runtime_min=30
+	benchmark:
+		"benchmark/merge/{project}/{sample}.tsv"
+	log:
+		"logs/{project}/{sample}/merge.log"
+	shell:
+		"""
+		mkdir -p merged/{wildcards.project}
+		INPUT=({input.files})
+		echo ${{#INPUT[@]}}
+		if ((${{#INPUT[@]}} == 1)); then
+			mv {input.files} merged/{wildcards.project}/{wildcards.sample}_tmp.bam
+		else
+			samtools merge -f -1 merged/{wildcards.project}/{wildcards.sample}_tmp.bam {input.files} 2>>{log}
+		fi
+		samtools sort -u merged/{wildcards.project}/{wildcards.sample}_tmp.bam -o {output.bam} 2>>{log}
+		samtools index {output.bam} 2>> {log}
+		rm merged/{wildcards.project}/{wildcards.sample}_tmp.bam
+		rm alignments/{wildcards.project}/{wildcards.sample}/*bam
+		samtools stats -t {input.regionCov} -g 30 {output.bam} > {output.stats} 2>>{log}
+		"""
+
+rule split:
+	output:
+		temp(scatter.split("splitted/{{project}}/{{sample}}_{scatteritem}"))
+	threads: 1
+	resources:
+		mem_mb=200,
+		runtime_min=5
+	log:
+		"logs/{project}/{sample}/{wildcards.scatteritem}.log}"
+	shell:
+		"touch {output}"
+
+rule variantCalling:
+	input:
+		bam="merged/{project}/{sample}.bam",
+		reference="/home/eli4001/databases/indexes/fastas/WuhanHu1.fasta",
+		ploidy="/home/eli4001/databases/indexes/fastas/ploidy.txt",
+		spt="data/split.txt",
+		dummy="splitted/{project}/{sample}_{scatteritem}"
+	output:
+		temp("splitted/{project}/{sample}_{scatteritem}.bcf")
+	threads: 1
+	resources:
+		mem_mb=2000,
+		runtime_min=30
+	benchmark:
+		"benchmark/variantCalling/{project}/{sample}_{scatteritem}.tsv"
+	log:
+		"logs/{project}/{sample}/variantCalling_{scatteritem}.log"
+	shell:
+		"""
+		STEP=$(echo {wildcards.scatteritem} | cut -c1)
+		RG=`sed -n -e "$STEP p" {input.spt}`
+		bcftools mpileup -r $RG -Ou --max-depth 1000 -f {input.reference} {input.bam} 2>>{log} | bcftools call -mv -Ou --ploidy-file {input.ploidy} -o {output} 2>>{log}
+		"""
+
+rule gatherVC:
+    input:
+        gather.split("splitted/{{project}}/{{sample}}_{scatteritem}.bcf")
+    output:
+    	temp("bcf/{project}/{sample}.bcf")
+    threads: 1
+	resources:
+		mem_mb=2000,
+		runtime_min=5
+	benchmark:
+		"benchmark/gatherVC/{project}/{sample}.tsv"
+	log:
+		"logs/{project}/{sample}/gatherVC.log"
+	shell:
+		"bcftools concat -n {input} > {output} 2>> {log}"
+
+
+rule filterAndIndex:
+	input:
+		bcf="bcf/{project}/{sample}.bcf"
+	output:
+		final="bcf_final/{project}/{sample}.bcf"
+	threads: 2
+	resources:
+		mem_mb=2000,
+		runtime_min=5
+	benchmark:
+		"benchmark/filterIndex/{project}/{sample}.tsv"
+	log:
+		"logs/{project}/{sample}/filterAndIndex.log"
+	shell:
+		"""
+		bcftools view -Ob -i '%QUAL>=20' {input.bcf} > {output.final} 2>>{log}
+		bcftools index {output.final} 2>>{log}
+		"""
+
+rule getConsensus:
+	input:
+		bcf="bcf_final/{project}/{sample}.bcf",
+		reference="/home/eli4001/databases/indexes/fastas/WuhanHu1.fasta"
+	output:
+		consensus="consensus/{project}/{sample}.fa"
+	threads: 2
+	resources:
+		mem_mb=2000,
+		runtime_min=5
+	benchmark:
+		"benchmark/getConsensus/{project}/{sample}.tsv"
+	log:
+		"logs/{project}/{sample}/getConsensus.log"
+	shell:
+		"""
+		bcftools consensus --sample merged/{wildcards.project}/{wildcards.sample}.bam -H A -M N -f {input.reference} {input.bcf} > {output.consensus} 2>>{log}
+		SMP=">"$(echo {wildcards.sample} | sed s/Sample_//)
+		REF=$(head -n 1 {output.consensus})
+		sed -i "s/$REF/$SMP/g" {output.consensus}
+		"""
