@@ -1,0 +1,93 @@
+################################################################################
+# GENERAL SETTINGS
+################################################################################
+# Sample metadata table
+samples: "config/samples.tsv"
+# Build indexes from scratch? True to build and False to download built indexes
+buildIndex: False
+# Overall compression level for all temporary files values accepted are from 1 (lower compression) to 9 (higher compression)
+compression_level: 4
+
+################################################################################
+# JOBS SETTINGS
+# ncpus_* = Number of threads to allocate for the job
+# mem_* = Amount of memory in MB to allocate for the job
+# rt_* = Max runtime the job is allow to run before it is killed
+################################################################################
+# Trimming and Quality Control
+adapters: "-a AGATCGGAAGAGCACACGTCTGAACTCCAGTCA -A AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT"
+ncpus_trim: 4
+mem_trim: 4000
+rt_trim: "04:00:00"
+
+# STAR Index
+ncpus_STAR_index: 8
+mem_STAR_index: 52000
+rt_STAR_index: "08:00:00"
+
+# STAR Align
+ncpus_STAR_align: 8
+mem_STAR_align: 45000
+rt_STAR_align: "04:00:00"
+
+# Sort Bam 
+ncpus_sortBam: 4
+mem_sortBam: 4000
+rt_sortBam: "08:00:00"
+
+# Merge Bam
+ncpus_mergeBam: 4
+mem_mergeBam: 4000
+rt_mergeBam: "08:00:00"
+
+# Salmon Index
+ncpus_salmonIndex: 8
+mem_salmonIndex: 25000
+rt_salmonIndex: "08:00:00"
+
+# Salmon quant
+ncpus_salmonQuant: 8
+mem_salmonQuant: 25000
+rt_salmonQuant: "08:00:00"
+
+# FeatureCounts
+ncpus_fc: 2
+mem_fc: 2000
+rt_fc: "04:00:00"
+fc_strand: 2
+
+# TxImport
+mem_txi: 4000
+rt_txi: "04:00:00"
+
+# arriba
+mem_arriba: 8000
+rt_arriba: "04:00:00"
+
+# STAR-fusion
+ncpus_STARfusion: 2
+mem_STARfusion: 4000
+rt_STARfusion: "04:00:00"
+
+#RSeQC
+mem_qc: 2000
+rt_qc: "00:30:00"
+################################################################################
+# Variant Calling Pipeline Configurations
+################################################################################
+mem_create_uBam: 4000
+rt_create_uBam: "04:00:00"
+mem_mergeBams: 4000
+rt_mergeBams: "04:00:00"
+mem_concat: 2000
+rt_concat: "04:00:00"
+mem_markDuplicates: 12000
+rt_markDuplicates: "08:00:00"
+mem_splitNCigars: 8000
+rt_splitNCigars: "04:00:00"
+mem_baseRecalibrator: 12000
+rt_baseRecalibrator: "08:00:00"
+mem_applyBQSR: 12000
+rt_applyBQSR: "12:00:00"
+mem_haplotypeCaller: 12000
+rt_haplotypeCaller: "24:00:00"
